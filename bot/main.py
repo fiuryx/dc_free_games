@@ -197,21 +197,10 @@ async def check_games_loop():
     with open(DATABASE_FILE, "w") as f:
         json.dump(database, f)
 
-# --- Comando /freegames ---
+# --- Comando /freegames arreglado ---
 @tree.command(name="freegames", description="Muestra los últimos juegos gratis")
 async def freegames(interaction: discord.Interaction):
-    user_id = interaction.user.id
-    now = time.time()
-    last = cooldowns.get(user_id, 0)
-
-    if now - last < COOLDOWN_SECONDS:
-        await interaction.response.send_message(
-            f"⏳ Espera {int(COOLDOWN_SECONDS - (now - last))} segundos antes de usar el comando otra vez.",
-            ephemeral=True
-        )
-        return
-
-    cooldowns[user_id] = now
+    await interaction.response.send_message("⏳ Buscando juegos gratis...", ephemeral=True)
 
     gp = gamerpower_games()
     cs = cheapshark_games()
@@ -221,7 +210,9 @@ async def freegames(interaction: discord.Interaction):
     gg = ggdeals_games()
     all_games = gp + cs + epic + prime + itad + gg
 
+    count = 0
     for game in all_games[:5]:
+        # Verificar duplicados como antes
         record = next((g for g in database["games"] if g["title"] == game["title"]), None)
         now_dt = datetime.now()
         send_game = False
@@ -238,7 +229,11 @@ async def freegames(interaction: discord.Interaction):
             store_url = get_store_url(game)
             embed, file = create_embed(game)
             view = ClaimButton(store_url)
-            await interaction.response.send_message(embed=embed, view=view, file=file)
+            await interaction.followup.send(embed=embed, view=view, file=file)
+            count += 1
+
+    if count == 0:
+        await interaction.followup.send("No se encontraron juegos nuevos en este momento.")
 
     with open(DATABASE_FILE, "w") as f:
         json.dump(database, f)
