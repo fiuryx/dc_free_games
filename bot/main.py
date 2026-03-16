@@ -64,7 +64,6 @@ def create_embed(game):
     logo = LOGOS.get(game["store"])
     if logo:
         embed.set_thumbnail(url=logo)
-    embed.set_footer(text="dc_free_games bot")
     return embed
 
 # --- Anti-spam de alertas automáticas ---
