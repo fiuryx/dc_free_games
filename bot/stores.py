@@ -51,32 +51,3 @@ def itad_games():
     except requests.RequestException as e:
         logger.error(f"Error al consultar ITAD: {e}")
         return []
-
-def ggdeals_games():
-    """
-    Lista de juegos gratis desde GG.deals
-    """
-    url = "https://gg.deals/api/games/free/"
-    try:
-        res = requests.get(url, timeout=10)
-        res.raise_for_status()
-        try:
-            data = res.json()
-        except ValueError:
-            logger.warning("GG.deals no devolvió JSON válido")
-            return []
-        games = []
-        for item in data.get("games", []):
-            store = item.get("store", "Unknown")
-            games.append({
-                "title": item.get("title"),
-                "store": store,
-                "url": item.get("url"),
-                "image": item.get("image"),
-                "startDate": item.get("start"),
-                "endDate": item.get("end")
-            })
-        return games
-    except requests.RequestException as e:
-        logger.error(f"Error al consultar GG.deals: {e}")
-        return []

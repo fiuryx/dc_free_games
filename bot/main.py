@@ -9,8 +9,7 @@ from stores import (
     cheapshark_games,
     epic_games,
     prime_games,
-    itad_games,
-    ggdeals_games
+    itad_games
 )
 import json
 from datetime import datetime, timedelta
@@ -154,8 +153,7 @@ async def check_games_loop():
     epic = epic_games()
     prime = prime_games()
     itad = itad_games()
-    gg = ggdeals_games()
-    all_games = gp + cs + epic + prime + itad + gg
+    all_games = gp + cs + epic + prime + itad
 
     verified_games = []
 
@@ -207,8 +205,7 @@ async def freegames(interaction: discord.Interaction):
     epic = epic_games()
     prime = prime_games()
     itad = itad_games()
-    gg = ggdeals_games()
-    all_games = gp + cs + epic + prime + itad + gg
+    all_games = gp + cs + epic + prime + itad
 
     count = 0
     for game in all_games[:5]:
