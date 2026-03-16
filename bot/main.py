@@ -10,13 +10,16 @@ from datetime import datetime, timedelta
 
 load_dotenv()
 
+# Configuración
 TOKEN = os.getenv("DISCORD_TOKEN")
 CHECK_INTERVAL = int(os.getenv("CHECK_INTERVAL", 3600))
 RESEND_DAYS = int(os.getenv("RESEND_DAYS", 30))
+CHANNEL_ID = int(os.getenv("DISCORD_CHANNEL_ID", "0"))  # Canal específico
 
 intents = discord.Intents.default()
 bot = commands.Bot(command_prefix="!", intents=intents)
 
+# Logos de tiendas
 LOGOS = {
     "Steam": "https://upload.wikimedia.org/wikipedia/commons/8/83/Steam_icon_logo.svg",
     "Epic Games": "https://upload.wikimedia.org/wikipedia/commons/3/31/Epic_Games_logo.svg",
@@ -24,11 +27,11 @@ LOGOS = {
     "Prime Gaming": "https://upload.wikimedia.org/wikipedia/commons/a/a9/Amazon_logo.svg"
 }
 
+# Base de datos local
 DATABASE_FILE = "database.json"
 MAX_ALERTS_PER_HOUR = 10
 alerts_sent = 0
 
-# Cargar DB
 if not os.path.exists(DATABASE_FILE):
     with open(DATABASE_FILE, "w") as f:
         json.dump({"games": []}, f)
@@ -36,13 +39,13 @@ if not os.path.exists(DATABASE_FILE):
 with open(DATABASE_FILE) as f:
     database = json.load(f)
 
-# Botón reclamar
+# Botón para reclamar juego
 class ClaimButton(discord.ui.View):
     def __init__(self, url):
         super().__init__()
         self.add_item(discord.ui.Button(label="🎮 Reclamar juego", url=url))
 
-# Embed
+# Crear embed para el juego
 def create_embed(game):
     embed = discord.Embed(
         title=game["title"],
@@ -56,6 +59,7 @@ def create_embed(game):
     embed.set_footer(text="dc_free_games bot")
     return embed
 
+# Anti-spam
 def can_send_alert():
     global alerts_sent
     return alerts_sent < MAX_ALERTS_PER_HOUR
@@ -64,12 +68,14 @@ def increment_alerts():
     global alerts_sent
     alerts_sent += 1
 
+# Reset de alertas cada hora
 @tasks.loop(hours=1)
 async def reset_alerts():
     global alerts_sent
     alerts_sent = 0
     logger.info("Reseteadas alertas horarias")
 
+# Loop principal de revisión de juegos
 @tasks.loop(seconds=CHECK_INTERVAL)
 async def check_games_loop():
     global database
@@ -102,9 +108,15 @@ async def check_games_loop():
 
     if verified_games:
         for guild in bot.guilds:
-            channel = guild.system_channel
+            # Usar canal específico por ID
+            channel = bot.get_channel(CHANNEL_ID)
             if not channel:
+                # fallback a canal de sistema
+                channel = guild.system_channel
+            if not channel:
+                logger.warning(f"No se encontró canal para enviar alertas en {guild.name}")
                 continue
+
             for game in verified_games:
                 if can_send_alert():
                     embed = create_embed(game)
@@ -113,15 +125,18 @@ async def check_games_loop():
                     increment_alerts()
                     logger.info(f"Enviado alerta: {game['title']}")
 
+    # Guardar base de datos actualizada
     with open(DATABASE_FILE, "w") as f:
         json.dump(database, f)
 
+# Eventos
 @bot.event
 async def on_ready():
     logger.info(f"Bot listo: {bot.user}")
     check_games_loop.start()
     reset_alerts.start()
 
+# Comando manual
 @bot.command()
 @commands.cooldown(1, 30, commands.BucketType.user)
 async def freegames(ctx):
