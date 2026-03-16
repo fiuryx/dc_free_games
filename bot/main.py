@@ -5,10 +5,14 @@ from discord import app_commands
 from dotenv import load_dotenv
 from logger import logger
 from stores import gamerpower_games, cheapshark_games, epic_games, prime_games
-from verifier import verify_game
 import json
 from datetime import datetime, timedelta
 import time
+
+# ➤ Pillow
+from PIL import Image, ImageOps
+from io import BytesIO
+import requests
 
 load_dotenv()
 
@@ -16,8 +20,10 @@ load_dotenv()
 TOKEN = os.getenv("DISCORD_TOKEN")
 CHECK_INTERVAL = int(os.getenv("CHECK_INTERVAL", 3600))
 RESEND_DAYS = int(os.getenv("RESEND_DAYS", 30))
-CHANNEL_ID = int(os.getenv("DISCORD_CHANNEL_ID", "0"))  # Canal específico
-MAX_ALERTS_PER_HOUR = 10
+CHANNEL_ID = int(os.getenv("DISCORD_CHANNEL_ID", "0"))
+
+# Tamaño de las imágenes redimensionadas
+IMAGE_SIZE = (231, 87)
 
 # --- Bot ---
 intents = discord.Intents.default()
@@ -43,75 +49,114 @@ if not os.path.exists(DATABASE_FILE):
 with open(DATABASE_FILE) as f:
     database = json.load(f)
 
-# --- Anti-spam para comando slash ---
+# --- Anti‑spam para comando slash ---
 cooldowns = {}
 COOLDOWN_SECONDS = 30
 
-# --- Botón para reclamar juego ---
+# --- Redimensionar imagen ---
+def resize_image(url):
+    """Descarga y ajusta la imagen a 231×87 px"""
+    response = requests.get(url)
+    img = Image.open(BytesIO(response.content))
+    img = ImageOps.fit(img, IMAGE_SIZE, Image.ANTIALIAS)
+
+    buffer = BytesIO()
+    img.save(buffer, format="PNG")
+    buffer.seek(0)
+    return buffer
+
+# --- Botón Reclamar ---
 class ClaimButton(discord.ui.View):
     def __init__(self, url):
         super().__init__()
-        self.add_item(discord.ui.Button(label="🎮 Reclamar juego", url=url))
+        self.add_item(discord.ui.Button(label=" Reclamar juego", url=url))
 
-# --- Embed ---
+# --- Obtener URL oficial de tienda ---
+def get_store_url(game):
+    """Devuelve la URL oficial de la tienda para cada juego"""
+    store = game.get("store")
+    
+    if store in ["Epic Games", "GOG", "Prime Gaming"]:
+        return game.get("url")
+    
+    if store == "Steam":
+        appid = game.get("steamAppID")
+        if appid:
+            return f"https://store.steampowered.com/app/{appid}"
+        return game.get("url")
+    
+    if store == "CheapShark":
+        return game.get("dealLink") or game.get("url")
+    
+    return game.get("url")
+
+# --- Crear embed con imagen redimensionada ---
 def create_embed(game):
     embed = discord.Embed(
         title=game["title"],
-        description=f"🎮 Juego gratis en **{game['store']}**",
+        description=f" 🎮 Juego gratis en **{game['store']}**",
         color=0x2ecc71
     )
-    embed.set_image(url=game["image"])
+
+    # Redimensionar imagen
+    buffer = resize_image(game["image"])
+    file = discord.File(fp=buffer, filename="game.png")
+    embed.set_image(url="attachment://game.png")
+
+    # Logo tienda
     logo = LOGOS.get(game["store"])
     if logo:
         embed.set_thumbnail(url=logo)
-    return embed
 
-# --- Anti-spam de alertas automáticas ---
+    return embed, file
+
+# --- Alertas automáticas ---
 def can_send_alert():
     global alerts_sent
-    return alerts_sent < MAX_ALERTS_PER_HOUR
+    return alerts_sent < int(os.getenv("MAX_ALERTS_PER_HOUR", 10))
 
 def increment_alerts():
     global alerts_sent
     alerts_sent += 1
 
-# --- Reset de alertas por hora ---
 @tasks.loop(hours=1)
 async def reset_alerts():
     global alerts_sent
     alerts_sent = 0
     logger.info("Reseteadas alertas horarias")
 
-# --- Loop de revisión de juegos ---
+# --- Loop de revisión ---
 @tasks.loop(seconds=CHECK_INTERVAL)
 async def check_games_loop():
     global database
     logger.info("Buscando juegos gratis...")
 
+    # Tomar todos los juegos de todas las fuentes
     gp = gamerpower_games()
     cs = cheapshark_games()
     epic = epic_games()
     prime = prime_games()
-
     all_games = gp + cs + epic + prime
+
     verified_games = []
 
     for game in all_games:
-        if verify_game(game, [gp, cs, epic]):
-            record = next((g for g in database["games"] if g["title"] == game["title"]), None)
-            now = datetime.now()
-            send_game = False
-            if record:
-                last_sent = datetime.fromisoformat(record["last_sent"])
-                if now - last_sent > timedelta(days=RESEND_DAYS):
-                    send_game = True
-                    record["last_sent"] = now.isoformat()
-            else:
-                send_game = True
-                database["games"].append({"title": game["title"], "last_sent": now.isoformat()})
+        # Revisar si ya se envió
+        record = next((g for g in database["games"] if g["title"] == game["title"]), None)
+        now = datetime.now()
+        send_game = False
 
-            if send_game:
-                verified_games.append(game)
+        if record:
+            last_sent = datetime.fromisoformat(record["last_sent"])
+            if now - last_sent > timedelta(days=RESEND_DAYS):
+                send_game = True
+                record["last_sent"] = now.isoformat()
+        else:
+            send_game = True
+            database["games"].append({"title": game["title"], "last_sent": now.isoformat()})
+
+        if send_game:
+            verified_games.append(game)
 
     if verified_games:
         for guild in bot.guilds:
@@ -124,27 +169,30 @@ async def check_games_loop():
 
             for game in verified_games:
                 if can_send_alert():
-                    embed = create_embed(game)
-                    view = ClaimButton(game["url"])
-                    await channel.send(embed=embed, view=view)
+                    store_url = get_store_url(game)
+                    embed, file = create_embed(game)
+                    view = ClaimButton(store_url)
+                    await channel.send(embed=embed, view=view, file=file)
                     increment_alerts()
                     logger.info(f"Enviado alerta: {game['title']}")
 
     with open(DATABASE_FILE, "w") as f:
         json.dump(database, f)
 
-# --- Comando slash /freegames ---
+# --- Comando /freegames ---
 @tree.command(name="freegames", description="Muestra los últimos juegos gratis")
 async def freegames(interaction: discord.Interaction):
     user_id = interaction.user.id
     now = time.time()
     last = cooldowns.get(user_id, 0)
+
     if now - last < COOLDOWN_SECONDS:
         await interaction.response.send_message(
             f"⏳ Espera {int(COOLDOWN_SECONDS - (now - last))} segundos antes de usar el comando otra vez.",
             ephemeral=True
         )
         return
+
     cooldowns[user_id] = now
 
     gp = gamerpower_games()
@@ -154,11 +202,29 @@ async def freegames(interaction: discord.Interaction):
     all_games = gp + cs + epic + prime
 
     for game in all_games[:5]:
-        embed = create_embed(game)
-        view = ClaimButton(game["url"])
-        await interaction.response.send_message(embed=embed, view=view)
+        # Solo enviar si no se ha enviado recientemente
+        record = next((g for g in database["games"] if g["title"] == game["title"]), None)
+        now_dt = datetime.now()
+        send_game = False
+        if record:
+            last_sent = datetime.fromisoformat(record["last_sent"])
+            if now_dt - last_sent > timedelta(days=RESEND_DAYS):
+                send_game = True
+                record["last_sent"] = now_dt.isoformat()
+        else:
+            send_game = True
+            database["games"].append({"title": game["title"], "last_sent": now_dt.isoformat()})
 
-# --- Eventos ---
+        if send_game:
+            store_url = get_store_url(game)
+            embed, file = create_embed(game)
+            view = ClaimButton(store_url)
+            await interaction.response.send_message(embed=embed, view=view, file=file)
+
+    with open(DATABASE_FILE, "w") as f:
+        json.dump(database, f)
+
+# --- Evento ready ---
 @bot.event
 async def on_ready():
     logger.info(f"Bot listo: {bot.user}")
