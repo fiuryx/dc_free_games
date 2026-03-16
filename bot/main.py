@@ -4,12 +4,19 @@ from discord.ext import tasks
 from discord import app_commands
 from dotenv import load_dotenv
 from logger import logger
-from stores import gamerpower_games, cheapshark_games, epic_games, prime_games
+from stores import (
+    gamerpower_games,
+    cheapshark_games,
+    epic_games,
+    prime_games,
+    itad_games,
+    ggdeals_games
+)
 import json
 from datetime import datetime, timedelta
 import time
 
-# ➤ Pillow
+# Pillow
 from PIL import Image, ImageOps
 from io import BytesIO
 import requests
@@ -22,7 +29,6 @@ CHECK_INTERVAL = int(os.getenv("CHECK_INTERVAL", 3600))
 RESEND_DAYS = int(os.getenv("RESEND_DAYS", 30))
 CHANNEL_ID = int(os.getenv("DISCORD_CHANNEL_ID", "0"))
 
-# Tamaño de las imágenes redimensionadas
 IMAGE_SIZE = (231, 87)
 
 # --- Bot ---
@@ -49,17 +55,15 @@ if not os.path.exists(DATABASE_FILE):
 with open(DATABASE_FILE) as f:
     database = json.load(f)
 
-# --- Anti‑spam para comando slash ---
+# --- Anti‑spam comando slash ---
 cooldowns = {}
 COOLDOWN_SECONDS = 30
 
 # --- Redimensionar imagen ---
 def resize_image(url):
-    """Descarga y ajusta la imagen a 231×87 px"""
     response = requests.get(url)
     img = Image.open(BytesIO(response.content))
     img = ImageOps.fit(img, IMAGE_SIZE, Image.ANTIALIAS)
-
     buffer = BytesIO()
     img.save(buffer, format="PNG")
     buffer.seek(0)
@@ -73,44 +77,58 @@ class ClaimButton(discord.ui.View):
 
 # --- Obtener URL oficial de tienda ---
 def get_store_url(game):
-    """Devuelve la URL oficial de la tienda para cada juego"""
     store = game.get("store")
-    
     if store in ["Epic Games", "GOG", "Prime Gaming"]:
         return game.get("url")
-    
     if store == "Steam":
         appid = game.get("steamAppID")
         if appid:
             return f"https://store.steampowered.com/app/{appid}"
         return game.get("url")
-    
     if store == "CheapShark":
         return game.get("dealLink") or game.get("url")
-    
     return game.get("url")
 
-# --- Crear embed con imagen redimensionada ---
+# --- Obtener duración de oferta ---
+def get_offer_duration(game):
+    end = game.get("endDate") or game.get("end") or game.get("expiryDate")
+    if end:
+        try:
+            try:
+                end_dt = datetime.fromisoformat(end)
+            except:
+                end_dt = datetime.fromtimestamp(int(end))
+            return f"⏰ Oferta válida hasta: {end_dt.strftime('%d/%m/%Y %H:%M')}"
+        except:
+            return None
+    return None
+
+# --- Crear embed ---
 def create_embed(game):
     embed = discord.Embed(
         title=game["title"],
-        description=f" 🎮 Juego gratis en **{game['store']}**",
+        description=f"🎮 Juego gratis en **{game['store']}**",
         color=0x2ecc71
     )
-
-    # Redimensionar imagen
-    buffer = resize_image(game["image"])
-    file = discord.File(fp=buffer, filename="game.png")
-    embed.set_image(url="attachment://game.png")
 
     # Logo tienda
     logo = LOGOS.get(game["store"])
     if logo:
         embed.set_thumbnail(url=logo)
 
+    # Duración oferta
+    offer_text = get_offer_duration(game)
+    if offer_text:
+        embed.add_field(name="Duración de la oferta", value=offer_text, inline=False)
+
+    # Imagen principal
+    buffer = resize_image(game["image"])
+    file = discord.File(fp=buffer, filename="game.png")
+    embed.set_image(url="attachment://game.png")
+
     return embed, file
 
-# --- Alertas automáticas ---
+# --- Alertas ---
 def can_send_alert():
     global alerts_sent
     return alerts_sent < int(os.getenv("MAX_ALERTS_PER_HOUR", 10))
@@ -125,23 +143,23 @@ async def reset_alerts():
     alerts_sent = 0
     logger.info("Reseteadas alertas horarias")
 
-# --- Loop de revisión ---
+# --- Loop revisión ---
 @tasks.loop(seconds=CHECK_INTERVAL)
 async def check_games_loop():
     global database
     logger.info("Buscando juegos gratis...")
 
-    # Tomar todos los juegos de todas las fuentes
     gp = gamerpower_games()
     cs = cheapshark_games()
     epic = epic_games()
     prime = prime_games()
-    all_games = gp + cs + epic + prime
+    itad = itad_games()
+    gg = ggdeals_games()
+    all_games = gp + cs + epic + prime + itad + gg
 
     verified_games = []
 
     for game in all_games:
-        # Revisar si ya se envió
         record = next((g for g in database["games"] if g["title"] == game["title"]), None)
         now = datetime.now()
         send_game = False
@@ -199,10 +217,11 @@ async def freegames(interaction: discord.Interaction):
     cs = cheapshark_games()
     epic = epic_games()
     prime = prime_games()
-    all_games = gp + cs + epic + prime
+    itad = itad_games()
+    gg = ggdeals_games()
+    all_games = gp + cs + epic + prime + itad + gg
 
     for game in all_games[:5]:
-        # Solo enviar si no se ha enviado recientemente
         record = next((g for g in database["games"] if g["title"] == game["title"]), None)
         now_dt = datetime.now()
         send_game = False

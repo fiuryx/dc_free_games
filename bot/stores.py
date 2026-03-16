@@ -1,60 +1,53 @@
 import requests
-from bs4 import BeautifulSoup
-from cache import cached_request
+import os
 
 def gamerpower_games():
-    url = "https://www.gamerpower.com/api/giveaways"
-    data = cached_request("gamerpower", url)
-    games = []
-    for g in data:
-        games.append({
-            "title": g["title"],
-            "store": g["platforms"],
-            "url": g["open_giveaway_url"],
-            "image": g.get("image", "")
-        })
-    return games
+    return []
 
 def cheapshark_games():
-    url = "https://www.cheapshark.com/api/1.0/deals?price=0"
-    data = cached_request("cheapshark", url)
+    return []
+
+def epic_games():
+    return []
+
+def prime_games():
+    return []
+
+# --- Nuevas fuentes ---
+ITAD_API_KEY = os.getenv("ITAD_API_KEY")
+
+def itad_games():
+    if not ITAD_API_KEY:
+        return []
+    url = f"https://api.isthereanydeal.com/v01/deals/list/?key={ITAD_API_KEY}&region=us&limit=50&isFree=1"
+    res = requests.get(url)
+    data = res.json()
     games = []
-    for g in data:
+    for deal in data.get("data", {}).get("list", []):
+        store = deal.get("shop_name", "Unknown")
         games.append({
-            "title": g["title"],
-            "store": "Steam",
-            "url": f"https://www.cheapshark.com/redirect?dealID={g['dealID']}",
-            "image": g["thumb"]
+            "title": deal.get("title"),
+            "store": store,
+            "url": deal.get("urls", {}).get("game", ""),
+            "image": deal.get("image", ""),
+            "startDate": deal.get("added"),
+            "endDate": deal.get("expiration")
         })
     return games
 
-def epic_games():
-    url = "https://store-site-backend-static.ak.epicgames.com/freeGamesPromotions"
-    data = cached_request("epic", url)
+def ggdeals_games():
+    url = "https://gg.deals/api/games/free/"
+    res = requests.get(url)
+    data = res.json()
     games = []
-    elements = data["data"]["Catalog"]["searchStore"]["elements"]
-    for g in elements:
-        if g.get("promotions"):
-            games.append({
-                "title": g["title"],
-                "store": "Epic Games",
-                "url": f"https://store.epicgames.com/es-ES/p/{g['productSlug']}",
-                "image": g["keyImages"][0]["url"]
-            })
-    return games
-
-def prime_games():
-    url = "https://gaming.amazon.com/home"
-    r = requests.get(url)
-    soup = BeautifulSoup(r.text, "html.parser")
-    games = []
-    for img in soup.find_all("img"):
-        title = img.get("alt")
-        if title and "game" in title.lower():
-            games.append({
-                "title": title,
-                "store": "Prime Gaming",
-                "url": url,
-                "image": img.get("src")
-            })
+    for item in data.get("games", []):
+        store = item.get("store", "Unknown")
+        games.append({
+            "title": item.get("title"),
+            "store": store,
+            "url": item.get("url"),
+            "image": item.get("image"),
+            "startDate": item.get("start"),
+            "endDate": item.get("end")
+        })
     return games
