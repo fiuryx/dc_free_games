@@ -5,3 +5,6 @@ __pycache__/
 .env
 games_db.json
 .git
+fly.toml
+.venv
+
