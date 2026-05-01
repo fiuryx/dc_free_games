@@ -1,6 +1,11 @@
+import sys
 import os
 import asyncio
 import discord
+
+
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from discord.ext import tasks, commands
 from discord import app_commands
 from datetime import datetime, timedelta
@@ -8,6 +13,8 @@ from datetime import datetime, timedelta
 from bot.sources.epic import fetch_epic_games
 from bot.sources.gamerpower import fetch_gamerpower_games
 from bot.db import load_db, save_db
+from dotenv import load_dotenv
+load_dotenv()
 
 TOKEN = os.getenv("DISCORD_TOKEN")
 CHANNEL_ID = int(os.getenv("DISCORD_CHANNEL_ID"))

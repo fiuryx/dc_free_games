@@ -1,4 +1,5 @@
-discord.py>=2.2.2
-requests>=2.28.0
-python-dotenv>=1.0.0
-pillow>=9.5.0
+discord.py
+requests
+aiohttp
+python-dotenv
+pillow
